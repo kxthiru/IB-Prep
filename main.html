@@ -76,10 +76,6 @@
     .cards-grid{display:grid; grid-template-columns: 1fr; gap:16px;}
     @media (min-width: 640px){ .cards-grid{ grid-template-columns: repeat(2, 1fr);} }
     @media (min-width: 1024px){ .cards-grid{ grid-template-columns: repeat(3, 1fr);} }
-
-    /* File drop zone */
-    .drop{border:1px dashed var(--border); border-radius:var(--radius-2xl); padding:14px; background:rgba(255,255,255,0.06);} 
-    .drop.dragover{background:rgba(255,255,255,0.1);} 
   </style>
 </head>
 <body>
@@ -104,19 +100,8 @@
       </div>
     </header>
 
-    <!-- File input / drop -->
+    <!-- Stats and mobile grid toggle -->
     <section class="row" style="gap:12px; margin-bottom:12px; align-items:stretch;">
-      <div class="drop" id="drop" style="flex:1;">
-        <div class="row" style="gap:8px; align-items:center;">
-          <strong>Load questions</strong>
-          <span class="muted small">(.xlsx, .xls, or .csv like your attached file)</span>
-        </div>
-        <div class="row" style="gap:8px; margin-top:8px;">
-          <input id="file" type="file" class="file" accept=".xlsx,.xls,.csv" />
-          <button id="clearFile" class="btn">Clear</button>
-        </div>
-        <div class="small muted" style="margin-top:6px;">Columns detected case-insensitively: <em>Company</em>, <em>Type</em>, <em>Question</em>, <em>Answer</em>. Extra columns are ignored.</div>
-      </div>
       <div class="chip" title="Stats"><span id="statCount">0</span><span class="muted">cards</span></div>
       <label class="btn hide-desktop" style="margin-left:auto; display:inline-flex; align-items:center; gap:8px;">
         <input id="gridToggleMobile" type="checkbox" />
@@ -262,7 +247,6 @@
 
     // ---------- DOM ----------
     const els = {
-      file: document.getElementById('file'), clearFile: document.getElementById('clearFile'), drop: document.getElementById('drop'),
       company: document.getElementById('company'), type: document.getElementById('type'), sortBy: document.getElementById('sortBy'), shuffle: document.getElementById('shuffle'),
       companyMobile: document.getElementById('companyMobile'), typeMobile: document.getElementById('typeMobile'), sortByMobile: document.getElementById('sortByMobile'), shuffleMobile: document.getElementById('shuffleMobile'),
       openFilters: document.getElementById('openFilters'), sheet: document.getElementById('sheet'), closeSheet: document.getElementById('closeSheet'), xSheet: document.getElementById('xSheet'), applyMobile: document.getElementById('applyMobile'),
@@ -272,26 +256,21 @@
       prev: document.getElementById('prev'), next: document.getElementById('next'), toggleAnswer: document.getElementById('toggleAnswer')
     };
 
-    // ---------- File loading (Excel/CSV) ----------
-    els.file.addEventListener('change', async (e)=>{
-      const f = e.target.files[0]; if(!f) return;
-      await loadWorkbookFile(f);
-    });
-    els.clearFile.addEventListener('click', ()=>{ els.file.value=''; allData=[]; index=0; revealAnswer=false; render(); });
-
-    // Drag & drop
-    ['dragenter','dragover'].forEach(ev=> els.drop.addEventListener(ev, (e)=>{ e.preventDefault(); e.stopPropagation(); els.drop.classList.add('dragover'); }));
-    ['dragleave','drop'].forEach(ev=> els.drop.addEventListener(ev, (e)=>{ e.preventDefault(); e.stopPropagation(); els.drop.classList.remove('dragover'); }));
-    els.drop.addEventListener('drop', async (e)=>{ const f = e.dataTransfer.files?.[0]; if(f) await loadWorkbookFile(f); });
-
-    async function loadWorkbookFile(file){
-      const data = await file.arrayBuffer();
-      const wb = XLSX.read(data, { type:'array' }); // supports xlsx, xls, csv
+    // ---------- Static file loading ----------
+    async function loadWorkbookStatic() {
+      const resp = await fetch("questions.xlsx");
+      const data = await resp.arrayBuffer();
+      const wb = XLSX.read(data, { type: "array" });
       const first = wb.SheetNames[0];
       const sheet = wb.Sheets[first];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval:'', raw:false });
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
       allData = normalizeRecords(rows);
-      index = 0; revealAnswer = false; randomized = false; sortBy='none'; updateFilterSources(); render();
+      index = 0; 
+      revealAnswer = false; 
+      randomized = false; 
+      sortBy = "none";
+      updateFilterSources();
+      render();
     }
 
     // ---------- Filters / controls wiring ----------
@@ -450,13 +429,8 @@
     }
 
     // ---------- Init ----------
-    function init(){
-      // start with empty dataset; populate company filter
-      updateFilterSources();
-      // default options
-      const comps = computeCompanies();
-      company = 'all';
-      render();
+    async function init() {
+      await loadWorkbookStatic();
     }
     init();
   </script>
