@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Interview Flashcards (Vanilla JS + Excel)</title>
+  <!-- One tiny, no-build dependency for reading Excel files in the browser -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    :root{
+      --bg-950:#0b1220; /* very dark indigo */
+      --slate-100:#f1f5f9; --slate-300:#cbd5e1; --slate-400:#94a3b8; --slate-900:#0f172a;
+      --glass: rgba(255,255,255,0.08); --glass-strong: rgba(255,255,255,0.12);
+      --border: rgba(255,255,255,0.14); --ring: rgba(255,255,255,0.12);
+      --cyan:#06b6d4; --purple:#9333ea; --sky:#0ea5e9;
+      --radius-xl: 16px; --radius-2xl: 24px; --shadow: 0 10px 30px rgba(0,0,0,0.35);
+      --min-card: 280px; --min-card-expanded: 420px;
+    }
+    html,body{height:100%;}
+    body{
+      margin:0; color:var(--slate-100);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background:
+        radial-gradient(1200px 600px at -10% -10%, #1f2937 0%, transparent 60%),
+        radial-gradient(800px 400px at 120% -20%, var(--sky) 0%, transparent 50%),
+        radial-gradient(700px 400px at 50% 120%, var(--purple) 0%, transparent 40%),
+        var(--bg-950);
+    }
+    .container{max-width:1120px; margin:0 auto; padding:24px 16px 60px;}
+    .row{display:flex; gap:12px; align-items:center;}
+    .between{justify-content:space-between;}
+    .btn{background:var(--glass); border:1px solid var(--border); border-radius:var(--radius-xl); padding:10px 14px; color:inherit; cursor:pointer; transition:transform .05s ease, background .2s ease;}
+    .btn:hover{background:var(--glass-strong);} .btn:active{transform:scale(0.99);} 
+    .chip{display:inline-flex; gap:8px; align-items:center; padding:6px 10px; border-radius:999px; background:var(--glass); border:1px solid var(--border);}
+    .select, .checkbox, .file{
+      width:100%; background:var(--glass); color:inherit; border:1px solid var(--border);
+      border-radius:var(--radius-xl); padding:10px 12px; outline:none; backdrop-filter: blur(6px);
+    }
+    .label{font-size:12px; color:var(--slate-300); display:block; margin:0 0 6px 2px;}
+    header h1{font-weight:600; letter-spacing:-0.02em; margin:0;}
+    header .logo{height:32px; width:32px; border-radius:12px; background:var(--glass); border:1px solid var(--border); backdrop-filter: blur(6px);} 
+
+    /* Grid helpers */
+    .grid{display:grid; gap:12px;} 
+    .grid-12{grid-template-columns:repeat(12, minmax(0,1fr));}
+    .col-span-5{grid-column: span 5 / span 5;} .col-span-3{grid-column: span 3 / span 3;} .col-span-1{grid-column: span 1 / span 1;}
+    @media (max-width: 768px){ .hide-md{display:none;} .show-md{display:inline-flex;} }
+    @media (min-width: 769px){ .hide-desktop{display:none;} }
+
+    /* Card flip */
+    .flip-container{ perspective: 1200px; }
+    .flip-inner{ position: relative; transform-style: preserve-3d; }
+    .flip-front, .flip-back{ position:absolute; inset:0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+    .flip-back{ transform: rotateY(180deg); }
+
+    .card{
+      border-radius: 24px; border:1px solid var(--border); background: var(--glass);
+      backdrop-filter: blur(12px); box-shadow: var(--shadow); ring:1px solid var(--ring);
+      padding:20px; display:flex; flex-direction:column; gap:10px;
+    }
+    .muted{color:var(--slate-400);} .small{font-size:12px;} .note{font-size:12px; color:var(--slate-400); text-align:center;}
+
+    .pill{display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:14px; background:var(--glass); border:1px solid var(--border);} 
+
+    /* Bottom sheet */
+    .sheet{position:fixed; inset:0; display:flex; flex-direction:column;}
+    .sheet-dim{flex:1; background:rgba(0,0,0,0.5);} 
+    .sheet-body{background: rgba(15,23,42,0.85); backdrop-filter: blur(10px); border-top:1px solid var(--border); border-radius:24px 24px 0 0; padding:16px;}
+
+    /* Utility */
+    .center{display:flex; align-items:center; justify-content:center;}
+    .text-center{text-align:center;}
+    .hidden{display:none !important;}
+
+    /* Responsive grid view */
+    .cards-grid{display:grid; grid-template-columns: 1fr; gap:16px;}
+    @media (min-width: 640px){ .cards-grid{ grid-template-columns: repeat(2, 1fr);} }
+    @media (min-width: 1024px){ .cards-grid{ grid-template-columns: repeat(3, 1fr);} }
+
+    /* File drop zone */
+    .drop{border:1px dashed var(--border); border-radius:var(--radius-2xl); padding:14px; background:rgba(255,255,255,0.06);} 
+    .drop.dragover{background:rgba(255,255,255,0.1);} 
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="row between" style="margin-bottom:16px;">
+      <div class="row" style="gap:12px;">
+        <div class="logo"></div>
+        <h1 style="font-size:clamp(20px, 3vw, 28px);">Interview Flashcards</h1>
+      </div>
+      <div class="row" style="gap:8px;">
+        <!-- Mobile filter button -->
+        <button id="openFilters" class="btn hide-desktop" aria-label="Open filters" title="Filters">
+          <!-- funnel icon -->
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12 10 19 14 21 14 12 22 3"></polygon></svg>
+        </button>
+        <!-- Desktop grid toggle -->
+        <label class="btn hide-md" style="display:flex; align-items:center; gap:8px;">
+          <input id="gridToggleDesktop" type="checkbox" />
+          <span class="small">Multiple Cards</span>
+        </label>
+      </div>
+    </header>
+
+    <!-- File input / drop -->
+    <section class="row" style="gap:12px; margin-bottom:12px; align-items:stretch;">
+      <div class="drop" id="drop" style="flex:1;">
+        <div class="row" style="gap:8px; align-items:center;">
+          <strong>Load questions</strong>
+          <span class="muted small">(.xlsx, .xls, or .csv like your attached file)</span>
+        </div>
+        <div class="row" style="gap:8px; margin-top:8px;">
+          <input id="file" type="file" class="file" accept=".xlsx,.xls,.csv" />
+          <button id="clearFile" class="btn">Clear</button>
+        </div>
+        <div class="small muted" style="margin-top:6px;">Columns detected case-insensitively: <em>Company</em>, <em>Type</em>, <em>Question</em>, <em>Answer</em>. Extra columns are ignored.</div>
+      </div>
+      <div class="chip" title="Stats"><span id="statCount">0</span><span class="muted">cards</span></div>
+      <label class="btn hide-desktop" style="margin-left:auto; display:inline-flex; align-items:center; gap:8px;">
+        <input id="gridToggleMobile" type="checkbox" />
+        <span>Grid</span>
+      </label>
+    </section>
+
+    <!-- Desktop filters row -->
+    <section class="grid grid-12 hide-md" style="margin-bottom:12px;">
+      <div class="col-span-5">
+        <label class="label">Company</label>
+        <select id="company" class="select"></select>
+      </div>
+      <div class="col-span-3">
+        <label class="label">Type</label>
+        <select id="type" class="select">
+          <option value="all">All</option>
+          <option value="technical">Technical</option>
+          <option value="behavioral">Behavioral</option>
+        </select>
+      </div>
+      <div class="col-span-3">
+        <label class="label">Sort by</label>
+        <select id="sortBy" class="select">
+          <option value="none">None</option>
+          <option value="company">Company (A→Z)</option>
+          <option value="type">Type (A→Z)</option>
+          <option value="question">Question (A→Z)</option>
+        </select>
+      </div>
+      <div class="col-span-1" style="display:flex; align-items:flex-end;">
+        <label class="pill" style="width:100%; cursor:pointer;">
+          <input id="shuffle" type="checkbox" />
+          <span class="small">Shuffle</span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Single view controls (counter + nav) -->
+    <section id="singleControls" class="center" style="flex-direction:column; gap:8px; margin:6px 0 16px;">
+      <div class="muted small" id="counter">Card 0 / 0</div>
+      <div class="row center" style="gap:8px;">
+        <button id="prev" class="btn">Prev</button>
+        <button id="toggleAnswer" class="btn">Show Answer</button>
+        <button id="next" class="btn">Next</button>
+      </div>
+      <p class="note">Swipe left/right on the card (mobile)</p>
+    </section>
+
+    <!-- Cards mount points -->
+    <div id="singleMount"></div>
+    <div id="gridMount" class="cards-grid hidden"></div>
+  </div>
+
+  <!-- Mobile Filters Sheet -->
+  <div id="sheet" class="sheet hidden" role="dialog" aria-modal="true">
+    <div class="sheet-dim" id="closeSheet"></div>
+    <div class="sheet-body">
+      <div class="center" style="justify-content:space-between; margin-bottom:10px;">
+        <div class="center" style="gap:12px; margin:0 auto;">
+          <div style="height:6px; width:48px; background:rgba(255,255,255,0.2); border-radius:999px;"></div>
+        </div>
+        <button class="btn" id="xSheet" aria-label="Close">✕</button>
+      </div>
+      <div style="display:grid; gap:12px;">
+        <div>
+          <label class="label">Company</label>
+          <select id="companyMobile" class="select"></select>
+        </div>
+        <div>
+          <label class="label">Type</label>
+          <select id="typeMobile" class="select">
+            <option value="all">All</option>
+            <option value="technical">Technical</option>
+            <option value="behavioral">Behavioral</option>
+          </select>
+        </div>
+        <div>
+          <label class="label">Sort by</label>
+          <select id="sortByMobile" class="select">
+            <option value="none">None</option>
+            <option value="company">Company (A→Z)</option>
+            <option value="type">Type (A→Z)</option>
+            <option value="question">Question (A→Z)</option>
+          </select>
+        </div>
+        <label class="pill" style="cursor:pointer;">
+          <input id="shuffleMobile" type="checkbox" />
+          <span class="small">Shuffle</span>
+        </label>
+        <button id="applyMobile" class="btn" style="background:var(--cyan); color:var(--slate-900); font-weight:600;">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ------- Configurable card sizing / interactions -------
+    const CARD_MIN_H = 280;                // base min height (px) when showing the question
+    const CARD_EXPANDED_MIN_H = 420;       // expanded min height (px) when revealing the answer
+    const SWIPE_THRESHOLD = 50;            // px swipe distance to trigger next/prev
+
+    // ---------- Utilities ----------
+    function shuffleArray(arr){
+      const a = [...arr];
+      for(let i=a.length-1;i>0;i--){ const j = Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; }
+      return a;
+    }
+    function mapKey(k){
+      const s = String(k||'').trim().toLowerCase();
+      if(s.includes('company')) return 'Company';
+      if(s.includes('question')) return 'Question';
+      if(s.includes('answer')) return 'Answer';
+      if(s.includes('behav')) return 'Type';
+      if(s.includes('techn') || s==='type') return 'Type';
+      return k;
+    }
+    function normalizeRecords(rows){
+      return rows.map((r)=>{
+        const out = { Company:'', Type:'', Question:'', Answer:'' };
+        for(const [k,v] of Object.entries(r||{})){
+          const kk = mapKey(k);
+          if(kk in out) out[kk] = v==null ? '' : String(v);
+        }
+        return out;
+      }).filter(r=>r.Question && r.Answer);
+    }
+    function splitCompanies(value){
+      return String(value||'').split(/[;\n,]/g).map(s=>s.replace(/\s+/g,' ').trim()).filter(Boolean);
+    }
+
+    // ---------- State ----------
+    let allData = [];
+    let company = 'all';
+    let type = 'all';
+    let sortBy = 'none';
+    let randomized = false;
+    let singleView = true;
+    let revealAnswer = false;
+    let index = 0;
+
+    // swipe state
+    let touchStartX = null; let touchDeltaX = 0;
+
+    // ---------- DOM ----------
+    const els = {
+      file: document.getElementById('file'), clearFile: document.getElementById('clearFile'), drop: document.getElementById('drop'),
+      company: document.getElementById('company'), type: document.getElementById('type'), sortBy: document.getElementById('sortBy'), shuffle: document.getElementById('shuffle'),
+      companyMobile: document.getElementById('companyMobile'), typeMobile: document.getElementById('typeMobile'), sortByMobile: document.getElementById('sortByMobile'), shuffleMobile: document.getElementById('shuffleMobile'),
+      openFilters: document.getElementById('openFilters'), sheet: document.getElementById('sheet'), closeSheet: document.getElementById('closeSheet'), xSheet: document.getElementById('xSheet'), applyMobile: document.getElementById('applyMobile'),
+      gridToggleDesktop: document.getElementById('gridToggleDesktop'), gridToggleMobile: document.getElementById('gridToggleMobile'),
+      statCount: document.getElementById('statCount'), counter: document.getElementById('counter'),
+      singleControls: document.getElementById('singleControls'), singleMount: document.getElementById('singleMount'), gridMount: document.getElementById('gridMount'),
+      prev: document.getElementById('prev'), next: document.getElementById('next'), toggleAnswer: document.getElementById('toggleAnswer')
+    };
+
+    // ---------- File loading (Excel/CSV) ----------
+    els.file.addEventListener('change', async (e)=>{
+      const f = e.target.files[0]; if(!f) return;
+      await loadWorkbookFile(f);
+    });
+    els.clearFile.addEventListener('click', ()=>{ els.file.value=''; allData=[]; index=0; revealAnswer=false; render(); });
+
+    // Drag & drop
+    ['dragenter','dragover'].forEach(ev=> els.drop.addEventListener(ev, (e)=>{ e.preventDefault(); e.stopPropagation(); els.drop.classList.add('dragover'); }));
+    ['dragleave','drop'].forEach(ev=> els.drop.addEventListener(ev, (e)=>{ e.preventDefault(); e.stopPropagation(); els.drop.classList.remove('dragover'); }));
+    els.drop.addEventListener('drop', async (e)=>{ const f = e.dataTransfer.files?.[0]; if(f) await loadWorkbookFile(f); });
+
+    async function loadWorkbookFile(file){
+      const data = await file.arrayBuffer();
+      const wb = XLSX.read(data, { type:'array' }); // supports xlsx, xls, csv
+      const first = wb.SheetNames[0];
+      const sheet = wb.Sheets[first];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval:'', raw:false });
+      allData = normalizeRecords(rows);
+      index = 0; revealAnswer = false; randomized = false; sortBy='none'; updateFilterSources(); render();
+    }
+
+    // ---------- Filters / controls wiring ----------
+    els.company.addEventListener('change', (e)=>{ company = e.target.value; index=0; revealAnswer=false; render(); });
+    els.type.addEventListener('change', (e)=>{ type = e.target.value; index=0; revealAnswer=false; render(); });
+    els.sortBy.addEventListener('change', (e)=>{ sortBy = e.target.value; render(); });
+    els.shuffle.addEventListener('change', (e)=>{ randomized = e.target.checked; index=0; render(); });
+
+    els.openFilters.addEventListener('click', ()=> els.sheet.classList.remove('hidden'));
+    els.closeSheet.addEventListener('click', ()=> els.sheet.classList.add('hidden'));
+    els.xSheet.addEventListener('click', ()=> els.sheet.classList.add('hidden'));
+    els.applyMobile.addEventListener('click', ()=>{
+      company = els.companyMobile.value;
+      type = els.typeMobile.value;
+      sortBy = els.sortByMobile.value;
+      randomized = els.shuffleMobile.checked;
+      els.sheet.classList.add('hidden'); index=0; revealAnswer=false; render();
+    });
+
+    function syncMobileFilters(){
+      els.companyMobile.value = company; els.typeMobile.value = type; els.sortByMobile.value = sortBy; els.shuffleMobile.checked = randomized;
+    }
+
+    // view toggles
+    function setSingleView(v){ singleView = v; revealAnswer=false; index=0; render(); }
+    els.gridToggleDesktop.addEventListener('change', (e)=> setSingleView(!e.target.checked));
+    els.gridToggleMobile.addEventListener('change', (e)=> setSingleView(!e.target.checked));
+
+    // navigation
+    els.prev.addEventListener('click', prevCard);
+    els.next.addEventListener('click', nextCard);
+    els.toggleAnswer.addEventListener('click', ()=>{ revealAnswer = !revealAnswer; render(); });
+
+    // keyboard shortcuts
+    window.addEventListener('keydown', (e)=>{
+      if(e.key==='ArrowRight') nextCard();
+      if(e.key==='ArrowLeft') prevCard();
+      if(e.code==='Space'){ e.preventDefault(); revealAnswer = !revealAnswer; render(); }
+    });
+
+    // ---------- Derived data ----------
+    function computeCompanies(){
+      const set = new Set();
+      for(const d of allData) splitCompanies(d.Company).forEach(c=> set.add(c));
+      const arr = Array.from(set).sort((a,b)=> a.localeCompare(b));
+      return ['all', ...arr];
+    }
+
+    function filteredList(){
+      let list = allData.filter(d=>{
+        const comps = splitCompanies(d.Company);
+        const matchCompany = company==='all' || comps.includes(company);
+        const t = String(d.Type||'').toLowerCase();
+        const normalizedType = t.includes('behav') ? 'behavioral' : (t.includes('tech') ? 'technical' : (t||''));
+        const matchType = type==='all' || normalizedType===type;
+        return matchCompany && matchType;
+      });
+      const cmp = (a,b,k)=> String(a[k]||'').localeCompare(String(b[k]||''));
+      if(sortBy==='company') list = [...list].sort((a,b)=> cmp(a,b,'Company'));
+      else if(sortBy==='type') list = [...list].sort((a,b)=> cmp(a,b,'Type'));
+      else if(sortBy==='question') list = [...list].sort((a,b)=> cmp(a,b,'Question'));
+      if(randomized) list = shuffleArray(list);
+      return list;
+    }
+
+    // ---------- Render ----------
+    function updateFilterSources(){
+      const companies = computeCompanies();
+      const opts = companies.map(c=> `<option value="${escapeHtml(c)}">${c==='all'?'All companies':(c||'(blank)')}</option>`).join('');
+      els.company.innerHTML = opts; els.company.value = company;
+      els.companyMobile.innerHTML = opts; els.companyMobile.value = company;
+      syncMobileFilters();
+    }
+
+    function render(){
+      const list = filteredList();
+      els.statCount.textContent = String(list.length);
+      els.counter.textContent = `Card ${list.length ? (index+1) : 0} / ${list.length}`;
+      // toggle mounts
+      els.gridMount.classList.toggle('hidden', singleView);
+      els.singleControls.classList.toggle('hidden', !singleView);
+      els.singleMount.innerHTML = '';
+      els.gridMount.innerHTML = '';
+
+      // single view
+      if(singleView){
+        const current = list[index] || null;
+        if(current){
+          els.singleMount.appendChild(makeFlashCard(current, {reveal:revealAnswer, withSwipe:true}));
+        }else{
+          els.singleMount.innerHTML = `<div class="card text-center">No cards match your filters.</div>`;
+        }
+        els.toggleAnswer.textContent = revealAnswer ? 'Hide Answer' : 'Show Answer';
+      }else{
+        // grid
+        list.forEach(qa=>{
+          els.gridMount.appendChild(makeFlashCard(qa, {reveal:false}));
+        });
+      }
+      // sync filter UIs
+      els.company.value = company; els.type.value = type; els.sortBy.value = sortBy; els.shuffle.checked = randomized;
+      syncMobileFilters();
+    }
+
+    function prevCard(){ const list = filteredList(); if(!list.length) return; index = (index - 1 + list.length) % list.length; revealAnswer=false; render(); }
+    function nextCard(){ const list = filteredList(); if(!list.length) return; index = (index + 1) % list.length; revealAnswer=false; render(); }
+
+    // ---------- Card factory ----------
+    function makeFlashCard(qa, {reveal=false, withSwipe=false}={}){
+      const wrapper = document.createElement('div');
+      wrapper.className = 'flip-container';
+      wrapper.style.minHeight = (reveal? CARD_EXPANDED_MIN_H : CARD_MIN_H) + 'px';
+
+      const inner = document.createElement('div'); inner.className = 'flip-inner'; inner.style.transition = 'transform 500ms';
+      inner.style.transform = `rotateY(${reveal?180:0}deg)`;
+
+      const front = document.createElement('div'); front.className = 'card flip-front'; front.style.minHeight = CARD_MIN_H + 'px';
+      const companyLabel = splitCompanies(qa.Company).join(' • ');
+      front.innerHTML = `
+        <div class="small muted" style="text-transform:uppercase; letter-spacing:.08em;">${escapeHtml(companyLabel||'(No company)')} • ${escapeHtml(qa.Type||'Type')}</div>
+        <div style="font-weight:600; font-size:clamp(16px, 2.4vw, 20px); line-height:1.35; white-space:pre-wrap;">${escapeHtml(qa.Question)}</div>
+        <div class="small muted" style="margin-top:auto;">Tap to reveal answer</div>
+      `;
+
+      const back = document.createElement('div'); back.className = 'card flip-back'; back.style.minHeight = CARD_EXPANDED_MIN_H + 'px';
+      back.innerHTML = `
+        <div class="small muted" style="text-transform:uppercase; letter-spacing:.08em;">Answer</div>
+        <div style="font-size:16px; line-height:1.6; white-space:pre-wrap;">${escapeHtml(qa.Answer || '(No answer provided)')}</div>
+        <div class="small muted" style="margin-top:8px;">Tap to flip back</div>
+      `;
+
+      inner.appendChild(front); inner.appendChild(back); wrapper.appendChild(inner);
+
+      // Click to toggle
+      wrapper.addEventListener('click', ()=>{
+        if(singleView){ revealAnswer = !revealAnswer; render(); } else {
+          // in grid, flip this one only
+          const flipped = inner.style.transform.includes('180');
+          inner.style.transform = `rotateY(${flipped?0:180}deg)`;
+          wrapper.style.minHeight = (flipped? CARD_MIN_H : CARD_EXPANDED_MIN_H) + 'px';
+        }
+      });
+
+      if(withSwipe){
+        wrapper.addEventListener('touchstart', (e)=>{ touchStartX = e.touches?.[0]?.clientX ?? null; touchDeltaX = 0; }, {passive:true});
+        wrapper.addEventListener('touchmove', (e)=>{ if(touchStartX==null) return; touchDeltaX = (e.touches?.[0]?.clientX ?? 0) - touchStartX; }, {passive:true});
+        wrapper.addEventListener('touchend', ()=>{ if(touchStartX==null) return; const dx = touchDeltaX; touchStartX = null; touchDeltaX = 0; if(Math.abs(dx)>SWIPE_THRESHOLD){ if(dx<0) nextCard(); else prevCard(); } }, {passive:true});
+      }
+
+      return wrapper;
+    }
+
+    // ---------- Helpers ----------
+    function escapeHtml(s){
+      return String(s).replace(/[&<>\"']/g, (c)=> ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;','\'':'&#39;'}[c]));
+    }
+
+    // ---------- Init ----------
+    function init(){
+      // start with empty dataset; populate company filter
+      updateFilterSources();
+      // default options
+      const comps = computeCompanies();
+      company = 'all';
+      render();
+    }
+    init();
+  </script>
+</body>
+</html>
